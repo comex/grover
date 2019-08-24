@@ -1,3 +1,4 @@
+
 """Byte pair encoding utilities
 
 Some functions are adapted from OpenAI but with modifications
@@ -52,22 +53,25 @@ def get_pairs(word):
 
 class Encoder:
     def __init__(self, encoder, bpe_merges, errors='replace'):
-        self.encoder = {k: v + 1 for k, v in encoder.items()}
-        self.encoder['<|padding|>'] = 0
-        self.padding = 0
+        # self.encoder = {k: v + 1 for k, v in encoder.items()}
+        # self.encoder['<|padding|>'] = 0
+        # self.padding = 0
+        #
+        # del self.encoder['<|endoftext|>']
+        #
+        # for special_token_type in ['domain', 'date', 'authors', 'title', 'article', 'summary']:
+        #     setattr(self, f'begin_{special_token_type}', len(self.encoder))
+        #     self.encoder[f'<|begin{special_token_type}|>'] = len(self.encoder)
+        #
+        #     setattr(self, f'end_{special_token_type}', len(self.encoder))
+        #     self.encoder[f'<|endof{special_token_type}|>'] = len(self.encoder)
+        #
+        # # This will be used if we want to combine short articles.
+        # self.reset_context = len(self.encoder)
+        # self.encoder['<|resetcontext|>'] = len(self.encoder)
 
-        del self.encoder['<|endoftext|>']
-
-        for special_token_type in ['domain', 'date', 'authors', 'title', 'article', 'summary']:
-            setattr(self, f'begin_{special_token_type}', len(self.encoder))
-            self.encoder[f'<|begin{special_token_type}|>'] = len(self.encoder)
-
-            setattr(self, f'end_{special_token_type}', len(self.encoder))
-            self.encoder[f'<|endof{special_token_type}|>'] = len(self.encoder)
-
-        # This will be used if we want to combine short articles.
-        self.reset_context = len(self.encoder)
-        self.encoder['<|resetcontext|>'] = len(self.encoder)
+        self.encoder = encoder
+        self.endoftext = self.encoder['<|endoftext|>']
 
         ################################## END OF SPECIAL TOKENS TO ADD
 
@@ -171,30 +175,30 @@ def _tokenize_article_pieces(encoder, item):
     fields are ['domain', 'date', 'authors', 'title', 'article', 'summary']
     :return: dict
     """
-    article_pieces = {
-        'article': [encoder.begin_article] + encoder.encode(item['text']) + [encoder.end_article],
-        'domain': [encoder.begin_domain] + encoder.encode(item['domain']) + [encoder.end_domain],
-        'title': [encoder.begin_title] + encoder.encode(item['title']) + [encoder.end_title],
-    }
-    # 4/6: Attach the summary too, why the hell not
-    if item['summary'] and len(item['summary']) > 50:
-        article_pieces['summary'] = [encoder.begin_summary] + encoder.encode(item['summary']) + [encoder.end_summary]
-
-    # 5/6: date
-    date_split = item['publish_date'].split('-')
-    assert len(date_split) == 3
-    assert date_split[0].isdigit()
-
-    date_txt = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
-                'August', 'September', 'October', 'November', 'December'][int(date_split[0]) - 1] + ' {}, {}'.format(
-        date_split[1], date_split[2])
-    article_pieces['date'] = [encoder.begin_date] + encoder.encode(date_txt) + [encoder.end_date]
-
-    # 6/6: authors
-    authors = ', '.join(item['authors'])
-    if len(authors) > 5:
-        article_pieces['authors'] = [encoder.begin_authors] + encoder.encode(authors) + [encoder.end_authors]
-    return article_pieces
+    # article_pieces = {
+    #     'article': [encoder.begin_article] + encoder.encode(item['text']) + [encoder.end_article],
+    #     'domain': [encoder.begin_domain] + encoder.encode(item['domain']) + [encoder.end_domain],
+    #     'title': [encoder.begin_title] + encoder.encode(item['title']) + [encoder.end_title],
+    # }
+    # # 4/6: Attach the summary too, why the hell not
+    # if item['summary'] and len(item['summary']) > 50:
+    #     article_pieces['summary'] = [encoder.begin_summary] + encoder.encode(item['summary']) + [encoder.end_summary]
+    #
+    # # 5/6: date
+    # date_split = item['publish_date'].split('-')
+    # assert len(date_split) == 3
+    # assert date_split[0].isdigit()
+    #
+    # date_txt = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+    #             'August', 'September', 'October', 'November', 'December'][int(date_split[0]) - 1] + ' {}, {}'.format(
+    #     date_split[1], date_split[2])
+    # article_pieces['date'] = [encoder.begin_date] + encoder.encode(date_txt) + [encoder.end_date]
+    #
+    # # 6/6: authors
+    # authors = ', '.join(item['authors'])
+    # if len(authors) > 5:
+    #     article_pieces['authors'] = [encoder.begin_authors] + encoder.encode(authors) + [encoder.end_authors]
+    return encoder.encode(item) + [encoder.endoftext]
 
 
 def _cut_tokens_to_add_stuff(tokens, stuff_to_add, desired_size, padding_token):
@@ -255,49 +259,50 @@ def tokenize_for_grover_training(encoder, item, desired_size=1024, unconditional
     :return:
     """
     # Get all the bits and pieces
-    article_pieces = _tokenize_article_pieces(encoder, item)
-    canonical_metadata_order = ['domain', 'date', 'authors', 'title']
+    tokens = _tokenize_article_pieces(encoder, item)
+    # canonical_metadata_order = ['domain', 'date', 'authors', 'title']
+    #
+    # # unconditional_prob is probability we only generate the text first, without any metadata
+    # switch = random.random()
+    # if switch < unconditional_prob:
+    #     assignments = {'article': 'a'}
+    #     chunk_a = article_pieces.pop('article')
+    #     chunk_b = []
+    #     for x in canonical_metadata_order + ['summary']:
+    #         if random.random() > metadata_dropout_prob:
+    #             chunk_b.extend(article_pieces.pop(x, []))
+    #             assignments[x] = 'b'
+    # elif switch < 0.5:
+    #     # Put everything in chunk_a, without dropout
+    #     assignments = {}
+    #     chunk_a = []
+    #     chunk_b = []
+    #     for x in canonical_metadata_order + ['article', 'summary']:
+    #         chunk_a.extend(article_pieces.pop(x, []))
+    #         assignments[x] = 'a'
+    # else:
+    #     assignments = {}
+    #     chunk_a = []
+    #     chunk_b = []
+    #     for k in canonical_metadata_order + ['article', 'summary']:
+    #         if random.random() < metadata_dropout_prob and k not in ('article', 'title'):
+    #             pass
+    #         elif random.random() < 0.5:
+    #             if k != 'summary':
+    #                 chunk_a.extend(article_pieces.pop(k, []))
+    #                 assignments[k] = 'a'
+    #         else:
+    #             chunk_b.extend(article_pieces.pop(k, []))
+    #             assignments[k] = 'b'
+    #
+    # if (len(chunk_a) + len(chunk_b)) <= desired_size:
+    #     return chunk_a + chunk_b
+    #
+    # if (assignments.get('article', '') == 'a') and (len(chunk_b) > 0) and (random.random() < cut_prob):
+    #     return _cut_tokens_to_add_stuff(chunk_a, chunk_b, desired_size, encoder.padding)
+    #
+    # tokens = chunk_a + chunk_b
 
-    # unconditional_prob is probability we only generate the text first, without any metadata
-    switch = random.random()
-    if switch < unconditional_prob:
-        assignments = {'article': 'a'}
-        chunk_a = article_pieces.pop('article')
-        chunk_b = []
-        for x in canonical_metadata_order + ['summary']:
-            if random.random() > metadata_dropout_prob:
-                chunk_b.extend(article_pieces.pop(x, []))
-                assignments[x] = 'b'
-    elif switch < 0.5:
-        # Put everything in chunk_a, without dropout
-        assignments = {}
-        chunk_a = []
-        chunk_b = []
-        for x in canonical_metadata_order + ['article', 'summary']:
-            chunk_a.extend(article_pieces.pop(x, []))
-            assignments[x] = 'a'
-    else:
-        assignments = {}
-        chunk_a = []
-        chunk_b = []
-        for k in canonical_metadata_order + ['article', 'summary']:
-            if random.random() < metadata_dropout_prob and k not in ('article', 'title'):
-                pass
-            elif random.random() < 0.5:
-                if k != 'summary':
-                    chunk_a.extend(article_pieces.pop(k, []))
-                    assignments[k] = 'a'
-            else:
-                chunk_b.extend(article_pieces.pop(k, []))
-                assignments[k] = 'b'
-
-    if (len(chunk_a) + len(chunk_b)) <= desired_size:
-        return chunk_a + chunk_b
-
-    if (assignments.get('article', '') == 'a') and (len(chunk_b) > 0) and (random.random() < cut_prob):
-        return _cut_tokens_to_add_stuff(chunk_a, chunk_b, desired_size, encoder.padding)
-
-    tokens = chunk_a + chunk_b
     return tokens
 
 
@@ -312,7 +317,7 @@ def create_int_feature(values):
     return feature
 
 
-def sliding_window(article, max_seq_length, pad_token):
+def sliding_window(article, max_seq_length):
     """
     Randomly sample some spans. It's a simple approximation of sliding window
     :param tokens:
@@ -322,7 +327,6 @@ def sliding_window(article, max_seq_length, pad_token):
     # if it's shorter, no need for this
     if len(article['input_ids']) <= max_seq_length:
         amount_to_pad = max_seq_length - len(article['input_ids'])
-        article['input_ids'].extend([pad_token] * amount_to_pad)
         yield article
         return
 
@@ -338,6 +342,33 @@ def sliding_window(article, max_seq_length, pad_token):
     for i in starts.tolist():
         article['input_ids'] = input_ids[i:(i + max_seq_length)]
         yield article
+
+# def sliding_window(article, max_seq_length, pad_token):
+#     """
+#     Randomly sample some spans. It's a simple approximation of sliding window
+#     :param tokens:
+#     :param max_seq_length:
+#     :return:
+#     """
+#     # if it's shorter, no need for this
+#     if len(article['input_ids']) <= max_seq_length:
+#         amount_to_pad = max_seq_length - len(article['input_ids'])
+#         article['input_ids'].extend([pad_token] * amount_to_pad)
+#         yield article
+#         return
+#
+#     num_spans = len(article['input_ids']) - max_seq_length + 1
+#     weights = np.ones(num_spans, dtype=np.float32)
+#     # weights[0] = max_seq_length
+#     weights /= weights.sum()
+#
+#     num_to_yield = int(0.5 + len(article['input_ids']) / max_seq_length)
+#     starts = np.random.choice(num_spans, size=num_to_yield, replace=False, p=weights)
+#
+#     input_ids = article.pop('input_ids')
+#     for i in starts.tolist():
+#         article['input_ids'] = input_ids[i:(i + max_seq_length)]
+#         yield article
 
 
 def format_context(encoder, news_article, target):
@@ -366,7 +397,6 @@ def format_context(encoder, news_article, target):
     tokens.append(encoder.__dict__[f'begin_{target}'])
     return tokens
 
-
 def extract_generated_target(output_tokens, encoder, target):
     """
     Given some tokens that were generated, extract the target
@@ -378,23 +408,43 @@ def extract_generated_target(output_tokens, encoder, target):
     # Filter out first instance of start token
     assert output_tokens.ndim == 1
 
-    start_tokens = output_tokens == encoder.__dict__[f'begin_{target}']
-    if np.any(start_tokens):
-        start_ind = np.argmax(start_tokens) + 1
-    else:
-        start_ind = 0
-
-    end_tokens = output_tokens == encoder.__dict__[f'end_{target}']
-    if np.any(end_tokens):
-        end_ind = np.argmax(end_tokens)
-    else:
-        end_ind = output_tokens.shape[0]
+    start_ind = 0
+    end_ind = output_tokens.shape[0]
 
     return {
         'extraction': encoder.decode(output_tokens[start_ind:end_ind]),
         'start_ind': start_ind,
         'end_ind': end_ind,
     }
+
+# def extract_generated_target(output_tokens, encoder, target):
+#     """
+#     Given some tokens that were generated, extract the target
+#     :param output_tokens: [num_tokens] thing that was generated
+#     :param encoder: how they were encoded
+#     :param target: the piece of metadata we wanted to generate!
+#     :return:
+#     """
+#     # Filter out first instance of start token
+#     assert output_tokens.ndim == 1
+#
+#     start_tokens = output_tokens == encoder.__dict__[f'begin_{target}']
+#     if np.any(start_tokens):
+#         start_ind = np.argmax(start_tokens) + 1
+#     else:
+#         start_ind = 0
+#
+#     end_tokens = output_tokens == encoder.__dict__[f'end_{target}']
+#     if np.any(end_tokens):
+#         end_ind = np.argmax(end_tokens)
+#     else:
+#         end_ind = output_tokens.shape[0]
+#
+#     return {
+#         'extraction': encoder.decode(output_tokens[start_ind:end_ind]),
+#         'start_ind': start_ind,
+#         'end_ind': end_ind,
+#     }
 
 
 if __name__ == '__main__':
